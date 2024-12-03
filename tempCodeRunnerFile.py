@@ -7,18 +7,17 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from utility import recv_message, send_message
 
+
+# OTP setup
+otp_secret = pyotp.random_base32()
+print("Server OTP Secret (for testing purposes):", otp_secret)
+totp = pyotp.TOTP(otp_secret)
+
 # RSA key pair generation
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
-# Store OTP secrets and used OTPs for each client
-client_otp_secrets = {}
-used_otps = {}
-
-def generate_client_otp():
-    """Generate a unique OTP secret for a new client."""
-    return pyotp.random_base32()
-
+# Helper function to receive data with length prefix
 def recv_with_length_prefix(conn):
     data_length = int.from_bytes(conn.recv(4), byteorder='big')
     data = conn.recv(data_length)
@@ -34,16 +33,6 @@ def receive_file_data(conn):
 
 def handle_client(conn):
     try:
-        global client_otp_secrets, used_otps
-
-        # Generate and store a unique OTP secret for this client
-        client_otp_secret = generate_client_otp()
-        client_totp = pyotp.TOTP(client_otp_secret)
-        client_otp_secrets[conn] = client_totp
-        used_otps[conn] = set()
-
-        print(f"OTP Secret for client: {client_otp_secret}")
-
         # Step 1: Send public RSA key
         public_key_bytes = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
@@ -54,21 +43,11 @@ def handle_client(conn):
         # Step 2: Receive OTP and verify
         client_otp = conn.recv(6).decode()
         print(f"Received OTP: {client_otp}")
-
-        # Check if OTP was already used
-        if client_otp in used_otps[conn]:
-            send_message(conn, "ERROR", "OTP already used (replay attack detected)")
-            conn.close()
-            return
-
-        # Verify OTP using TOTP
-        if not client_totp.verify(client_otp):
+        if not totp.verify(client_otp):
             send_message(conn, "ERROR", "Invalid OTP")
             conn.close()
             return
 
-        # Mark OTP as used
-        used_otps[conn].add(client_otp)
         send_message(conn, "STATUS", "OTP verified")
 
         # Step 3: Receive encrypted AES key
@@ -146,8 +125,7 @@ def handle_client(conn):
     finally:
         print("Closing connection.")
         conn.close()
-        del client_otp_secrets[conn]
-        del used_otps[conn]
+
 
 # Server setup
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
