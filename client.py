@@ -6,33 +6,33 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from utility import recv_message, send_message
 
-# OTP setup
-otp_secret = input("Enter the OTP secret (same as server's for testing): ")
-totp = pyotp.TOTP(otp_secret)
-
-# Generate AES key
-aes_key = os.urandom(32)
-
 # Client setup
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect(('localhost', 65432))
 
-# Step 1: Receive public RSA key
+# Step 1: Receive public RSA key from the server
 server_public_key_bytes = client_socket.recv(1024)
 server_public_key = serialization.load_pem_public_key(server_public_key_bytes)
 
-# Step 2: Send OTP
+# Step 2: Generate OTP based on the secret received from the server
+otp_secret = input("Enter OTP secret (provided by server for testing): ")
+totp = pyotp.TOTP(otp_secret)
+
+# Send OTP to the server
 otp = totp.now()
 print(f"Sending OTP: {otp}")
 client_socket.sendall(otp.encode())
 
-# Step 3: Encrypt AES key and send
+# Step 3: Generate AES key for file encryption
+aes_key = os.urandom(32)
+
+# Encrypt AES key using the server's public RSA key
 encrypted_aes_key = server_public_key.encrypt(
     aes_key,
     padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
 )
 
-# Send length of AES key first
+# Send the length of the encrypted AES key and the encrypted AES key itself
 client_socket.sendall(len(encrypted_aes_key).to_bytes(4, byteorder='big'))
 client_socket.sendall(encrypted_aes_key)
 
@@ -44,6 +44,8 @@ while True:
         if not os.path.exists(file_path):
             print("File not found.")
             continue
+
+        # Encrypt the file to be sent
         with open(file_path, "rb") as f:
             file_data = f.read()
         iv = os.urandom(16)
@@ -51,9 +53,13 @@ while True:
         encryptor = cipher.encryptor()
         encrypted_data = encryptor.update(file_data) + encryptor.finalize()
         salt = os.urandom(16)
+        
+        # Compute the hash of the encrypted data for file integrity
         hasher = hashes.Hash(hashes.SHA256())
         hasher.update(encrypted_data + salt)
         file_hash = hasher.finalize()
+
+        # Send the file details
         send_message(client_socket, "SEND_FILE", {"file_name": os.path.basename(file_path)})
         send_message(client_socket, "IV", iv.hex())
         send_message(client_socket, "ENCRYPTED_FILE", encrypted_data.hex())
@@ -83,10 +89,9 @@ while True:
             file_name_only, file_extension = os.path.splitext(file_name)
             formatted_file_name = f"received_{file_name_only}{file_extension}"
 
-            
             with open(formatted_file_name, "wb") as f:
                 f.write(file_data)
-                print(f"File {formatted_file_name} received and decrypted successfully.")
+            print(f"File {formatted_file_name} received and decrypted successfully.")
 
     elif command == "EXIT":
         send_message(client_socket, "EXIT", "")
