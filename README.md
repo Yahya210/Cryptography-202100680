@@ -70,6 +70,9 @@ Integrity Verification
 
 Files are hashed using SHA-256 with a salt to ensure data integrity.
 
+## Encrypted In Wireshark
+
+<img width="1440" alt="Screenshot 2024-12-03 at 8 11 18 PM" src="https://github.com/user-attachments/assets/4309da63-3ed5-4575-bb4d-0d20209c4dc0">
 
 Replay Attack Prevention
 
