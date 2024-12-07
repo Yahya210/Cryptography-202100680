@@ -4,7 +4,7 @@ import pyotp
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from utility import recv_message, send_message
+from utility import recv_message, send_message, flush_socket
 
 # Client setup
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -65,36 +65,42 @@ while True:
         send_message(client_socket, "ENCRYPTED_FILE", encrypted_data.hex())
         send_message(client_socket, "HASH", file_hash.hex())
         send_message(client_socket, "SALT", salt.hex())
+        flush_socket(client_socket)
+
     elif command == "REQUEST_FILE":
         file_name = input("Enter the file name to request: ").strip()
         send_message(client_socket, "REQUEST_FILE", file_name)
 
-        # Wait for the server response
-        status = recv_message(client_socket)
-        if status[0] == "ERROR":
-            print(f"Error: {status[1]}")
-        else:
-            # Receive the IV, encrypted data, salt, and hash
-            iv = recv_message(client_socket)[1]
-            encrypted_data = recv_message(client_socket)[1]
-            file_hash = recv_message(client_socket)[1]
-            salt = recv_message(client_socket)[1]
+        # Receive all parts of the file data
+        iv_type, iv_payload = recv_message(client_socket)
+        encrypted_data_type, encrypted_data_payload = recv_message(client_socket)
+        file_hash_type, file_hash_payload = recv_message(client_socket)
+        salt_type, salt_payload = recv_message(client_socket)
+        
+        if iv_type == "IV" and encrypted_data_type == "ENCRYPTED_FILE":
+            iv = bytes.fromhex(iv_payload)
+            encrypted_data = bytes.fromhex(encrypted_data_payload)
+            salt = bytes.fromhex(salt_payload)
 
-            # Decrypt file (using the AES key)
-            cipher = Cipher(algorithms.AES(aes_key), modes.CFB(bytes.fromhex(iv)))
+            # Decrypt the file
+            cipher = Cipher(algorithms.AES(aes_key), modes.CFB(iv))
             decryptor = cipher.decryptor()
-            file_data = decryptor.update(bytes.fromhex(encrypted_data)) + decryptor.finalize()
+            file_data = decryptor.update(encrypted_data) + decryptor.finalize()
 
-            # Step 5: Save the file with the naming format
+            # Save the file
             file_name_only, file_extension = os.path.splitext(file_name)
             formatted_file_name = f"received_{file_name_only}{file_extension}"
 
             with open(formatted_file_name, "wb") as f:
                 f.write(file_data)
             print(f"File {formatted_file_name} received and decrypted successfully.")
-
+            flush_socket(client_socket)
+        else:
+            print("Error receiving file components. Please check the server.")
+    
     elif command == "EXIT":
         send_message(client_socket, "EXIT", "")
+        print("Exiting...")
         break
 
 client_socket.close()

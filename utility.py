@@ -1,4 +1,5 @@
 import json
+import socket
 
 def send_message(sock, message_type, payload):
     """Send a message with type and payload."""
@@ -45,3 +46,14 @@ def recv_message(sock):
     except Exception as e:
         print(f"Error in recv_message: {e}")
         return None, None
+
+def flush_socket(conn):
+    conn.settimeout(0.1)  # Temporarily set a timeout to avoid blocking
+    try:
+        while conn.recv(1024):  # Read until there's no more data
+            pass
+    except socket.timeout:
+        pass  # Timeout means there's no more data
+    finally:
+        conn.settimeout(None)  # Reset the timeout to blocking mode
+
